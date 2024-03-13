@@ -1,0 +1,13 @@
+diff --git a/unix/xserver/hw/vnc/vncInput.c b/unix/xserver/hw/vnc/vncInput.c
+index b3d0926d..d36a096f 100644
+--- a/unix/xserver/hw/vnc/vncInput.c
++++ b/unix/xserver/hw/vnc/vncInput.c
+@@ -167,7 +167,7 @@ void vncPointerMove(int x, int y)
+ 
+ void vncGetPointerPos(int *x, int *y)
+ {
+-	if (vncPointerDev != NULL) {
++	if (vncPointerDev != NULL && !IsFloating(vncPointerDev)) {
+ 		ScreenPtr ptrScreen;
+ 
+ 		miPointerGetPosition(vncPointerDev, &cursorPosX, &cursorPosY);
