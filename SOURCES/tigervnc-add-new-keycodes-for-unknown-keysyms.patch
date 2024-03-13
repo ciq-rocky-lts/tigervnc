@@ -1,0 +1,199 @@
+From ccbd491fa48f1c43daeb1a6c5ee91a1a8fa3db88 Mon Sep 17 00:00:00 2001
+From: Jan Grulich <jgrulich@redhat.com>
+Date: Tue, 9 Aug 2022 14:31:07 +0200
+Subject: [PATCH] x0vncserver: add new keysym in case we don't find a matching
+ keycode
+
+We might often fail to find a matching X11 keycode when the client has
+a different keyboard layout and end up with no key event. To avoid a
+failure we add it as a new keysym/keycode pair so the next time a keysym
+from the client that is unknown to the server is send, we will find a
+match and proceed with key event. This is same behavior used in Xvnc or
+x11vnc, although Xvnc has more advanced mapping from keysym to keycode.
+---
+ unix/x0vncserver/XDesktop.cxx | 121 +++++++++++++++++++++++++++++++++-
+ unix/x0vncserver/XDesktop.h   |   4 ++
+ 2 files changed, 122 insertions(+), 3 deletions(-)
+
+diff --git a/unix/x0vncserver/XDesktop.cxx b/unix/x0vncserver/XDesktop.cxx
+index f2046e43e..933998f05 100644
+--- a/unix/x0vncserver/XDesktop.cxx
++++ b/unix/x0vncserver/XDesktop.cxx
+@@ -31,6 +31,7 @@
+ #include <x0vncserver/XDesktop.h>
+
+ #include <X11/XKBlib.h>
++#include <X11/Xutil.h>
+ #ifdef HAVE_XTEST
+ #include <X11/extensions/XTest.h>
+ #endif
+@@ -50,6 +51,7 @@ void vncSetGlueContext(Display *dpy, void *res);
+ #include <x0vncserver/Geometry.h>
+ #include <x0vncserver/XPixelBuffer.h>
+
++using namespace std;
+ using namespace rfb;
+
+ extern const unsigned short code_map_qnum_to_xorgevdev[];
+@@ -264,6 +266,9 @@ void XDesktop::start(VNCServer* vs) {
+ void XDesktop::stop() {
+   running = false;
+
++  // Delete added keycodes
++  deleteAddedKeysyms(dpy);
++
+ #ifdef HAVE_XDAMAGE
+   if (haveDamage)
+     XDamageDestroy(dpy, damage);
+@@ -383,6 +388,118 @@ KeyCode XDesktop::XkbKeysymToKeycode(Display* dpy, KeySym keysym) {
+ }
+ #endif
+
++KeyCode XDesktop::addKeysym(Display* dpy, KeySym keysym)
++{
++  int types[1];
++  unsigned int key;
++  XkbDescPtr xkb;
++  XkbMapChangesRec changes;
++  KeySym *syms;
++  KeySym upper, lower;
++
++  xkb = XkbGetMap(dpy, XkbAllComponentsMask, XkbUseCoreKbd);
++
++  if (!xkb)
++    return 0;
++
++  for (key = xkb->max_key_code; key >= xkb->min_key_code; key--) {
++    if (XkbKeyNumGroups(xkb, key) == 0)
++      break;
++  }
++
++  if (key < xkb->min_key_code)
++    return 0;
++
++  memset(&changes, 0, sizeof(changes));
++
++  XConvertCase(keysym, &lower, &upper);
++
++  if (upper == lower)
++    types[XkbGroup1Index] = XkbOneLevelIndex;
++  else
++    types[XkbGroup1Index] = XkbAlphabeticIndex;
++
++  XkbChangeTypesOfKey(xkb, key, 1, XkbGroup1Mask, types, &changes);
++
++  syms = XkbKeySymsPtr(xkb,key);
++  if (upper == lower)
++    syms[0] = keysym;
++  else {
++    syms[0] = lower;
++    syms[1] = upper;
++  }
++
++  changes.changed |= XkbKeySymsMask;
++  changes.first_key_sym = key;
++  changes.num_key_syms = 1;
++
++  if (XkbChangeMap(dpy, xkb, &changes)) {
++    vlog.info("Added unknown keysym %s to keycode %d", XKeysymToString(keysym), key);
++    addedKeysyms[keysym] = key;
++    return key;
++  }
++
++  return 0;
++}
++
++void XDesktop::deleteAddedKeysyms(Display* dpy) {
++  XkbDescPtr xkb;
++  xkb = XkbGetMap(dpy, XkbAllComponentsMask, XkbUseCoreKbd);
++
++  if (!xkb)
++    return;
++
++  XkbMapChangesRec changes;
++  memset(&changes, 0, sizeof(changes));
++
++  KeyCode lowestKeyCode = xkb->max_key_code;
++  KeyCode highestKeyCode = xkb->min_key_code;
++  std::map<KeySym, KeyCode>::iterator it;
++  for (it = addedKeysyms.begin(); it != addedKeysyms.end(); it++) {
++    if (XkbKeyNumGroups(xkb, it->second) != 0) {
++      // Check if we are removing keysym we added ourself
++      if (XkbKeysymToKeycode(dpy, it->first) != it->second)
++        continue;
++
++      XkbChangeTypesOfKey(xkb, it->second, 0, XkbGroup1Mask, NULL, &changes);
++
++      if (it->second < lowestKeyCode)
++        lowestKeyCode = it->second;
++
++      if (it->second > highestKeyCode)
++        highestKeyCode = it->second;
++    }
++  }
++
++  changes.changed |= XkbKeySymsMask;
++  changes.first_key_sym = lowestKeyCode;
++  changes.num_key_syms = highestKeyCode - lowestKeyCode + 1;
++  XkbChangeMap(dpy, xkb, &changes);
++
++  addedKeysyms.clear();
++}
++
++KeyCode XDesktop::keysymToKeycode(Display* dpy, KeySym keysym) {
++  int keycode = 0;
++
++  // XKeysymToKeycode() doesn't respect state, so we have to use
++  // something slightly more complex
++  keycode = XkbKeysymToKeycode(dpy, keysym);
++
++  if (keycode != 0)
++    return keycode;
++
++  // TODO: try to further guess keycode with all possible mods as Xvnc does
++
++  keycode = addKeysym(dpy, keysym);
++
++  if (keycode == 0)
++    vlog.error("Failure adding new keysym 0x%lx", keysym);
++
++  return keycode;
++}
++
++
+ void XDesktop::keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down) {
+ #ifdef HAVE_XTEST
+   int keycode = 0;
+@@ -398,9 +515,7 @@ void XDesktop::keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down) {
+     if (pressedKeys.find(keysym) != pressedKeys.end())
+       keycode = pressedKeys[keysym];
+     else {
+-      // XKeysymToKeycode() doesn't respect state, so we have to use
+-      // something slightly more complex
+-      keycode = XkbKeysymToKeycode(dpy, keysym);
++      keycode = keysymToKeycode(dpy, keysym);
+     }
+   }
+
+diff --git a/unix/x0vncserver/XDesktop.h b/unix/x0vncserver/XDesktop.h
+index 840d43316..6ebcd9f8a 100644
+--- a/unix/x0vncserver/XDesktop.h
++++ b/unix/x0vncserver/XDesktop.h
+@@ -55,6 +55,9 @@ class XDesktop : public rfb::SDesktop,
+                                const char* userName);
+   virtual void pointerEvent(const rfb::Point& pos, int buttonMask);
+   KeyCode XkbKeysymToKeycode(Display* dpy, KeySym keysym);
++  KeyCode addKeysym(Display* dpy, KeySym keysym);
++  void deleteAddedKeysyms(Display* dpy);
++  KeyCode keysymToKeycode(Display* dpy, KeySym keysym);
+   virtual void keyEvent(rdr::U32 keysym, rdr::U32 xtcode, bool down);
+   virtual void clientCutText(const char* str);
+   virtual unsigned int setScreenLayout(int fb_width, int fb_height,
+@@ -78,6 +81,7 @@ class XDesktop : public rfb::SDesktop,
+   bool haveXtest;
+   bool haveDamage;
+   int maxButtons;
++  std::map<KeySym, KeyCode> addedKeysyms;
+   std::map<KeySym, KeyCode> pressedKeys;
+   bool running;
+ #ifdef HAVE_XDAMAGE

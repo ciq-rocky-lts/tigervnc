@@ -1,0 +1,117 @@
+From f783d5c8b567199178b6690f347e060a69d2aa36 Mon Sep 17 00:00:00 2001
+From: Jan Grulich <jgrulich@redhat.com>
+Date: Thu, 11 Aug 2022 13:15:29 +0200
+Subject: [PATCH] x0vncserver: update/display cursor only on correct screen in
+ zaphod mode
+
+We have to check whether we update cursor position/shape only in case
+the cursor is on our display, otherwise in zaphod mode, ie. when having
+two instances of x0vncserver on screens :0.0 and :0.1 we would be having
+the cursor duplicated and actually not funcional (aka ghost cursor) as
+it would be actually not present. We also additionally watch EnterNotify
+and LeaveNotify events in order to show/hide cursor accordingly.
+
+Change made with help from Olivier Fourdan <ofourdan@redhat.com>
+---
+ unix/x0vncserver/XDesktop.cxx | 60 +++++++++++++++++++++++++++++++----
+ 1 file changed, 53 insertions(+), 7 deletions(-)
+
+diff --git a/unix/x0vncserver/XDesktop.cxx b/unix/x0vncserver/XDesktop.cxx
+index f2046e43e..f07fd78bf 100644
+--- a/unix/x0vncserver/XDesktop.cxx
++++ b/unix/x0vncserver/XDesktop.cxx
+@@ -192,7 +192,8 @@ XDesktop::XDesktop(Display* dpy_, Geometry *geometry_)
+                    RRScreenChangeNotifyMask | RRCrtcChangeNotifyMask);
+     /* Override TXWindow::init input mask */
+     XSelectInput(dpy, DefaultRootWindow(dpy),
+-                 PropertyChangeMask | StructureNotifyMask | ExposureMask);
++                 PropertyChangeMask | StructureNotifyMask |
++                 ExposureMask | EnterWindowMask | LeaveWindowMask);
+   } else {
+ #endif
+     vlog.info("RANDR extension not present");
+@@ -217,11 +218,13 @@ void XDesktop::poll() {
+     Window root, child;
+     int x, y, wx, wy;
+     unsigned int mask;
+-    XQueryPointer(dpy, DefaultRootWindow(dpy), &root, &child,
+-                  &x, &y, &wx, &wy, &mask);
+-    x -= geometry->offsetLeft();
+-    y -= geometry->offsetTop();
+-    server->setCursorPos(rfb::Point(x, y), false);
++
++    if (XQueryPointer(dpy, DefaultRootWindow(dpy), &root, &child,
++                      &x, &y, &wx, &wy, &mask)) {
++      x -= geometry->offsetLeft();
++      y -= geometry->offsetTop();
++      server->setCursorPos(rfb::Point(x, y), false);
++    }
+   }
+ }
+
+@@ -253,7 +256,14 @@ void XDesktop::start(VNCServer* vs) {
+ #endif
+
+ #ifdef HAVE_XFIXES
+-  setCursor();
++  Window root, child;
++  int x, y, wx, wy;
++  unsigned int mask;
++  // Check whether the cursor is initially on our screen
++  if (XQueryPointer(dpy, DefaultRootWindow(dpy), &root, &child,
++                    &x, &y, &wx, &wy, &mask))
++    setCursor();
++
+ #endif
+
+   server->setLEDState(ledState);
+@@ -701,6 +711,15 @@ bool XDesktop::handleGlobalEvent(XEvent* ev) {
+     if (cev->subtype != XFixesDisplayCursorNotify)
+       return false;
+
++    Window root, child;
++    int x, y, wx, wy;
++    unsigned int mask;
++
++    // Check whether the cursor is initially on our screen
++    if (!XQueryPointer(dpy, DefaultRootWindow(dpy), &root, &child,
++                      &x, &y, &wx, &wy, &mask))
++      return false;
++
+     return setCursor();
+ #endif
+ #ifdef HAVE_XRANDR
+@@ -753,6 +772,33 @@ bool XDesktop::handleGlobalEvent(XEvent* ev) {
+
+     return true;
+ #endif
++#ifdef HAVE_XFIXES
++  } else if (ev->type == EnterNotify) {
++    XCrossingEvent* cev;
++
++    if (!running)
++      return true;
++
++    cev = (XCrossingEvent*)ev;
++
++    if (cev->window != cev->root)
++      return false;
++
++    return setCursor();
++  } else if (ev->type == LeaveNotify) {
++    XCrossingEvent* cev;
++
++    if (!running)
++      return true;
++
++    cev = (XCrossingEvent*)ev;
++
++    if (cev->window == cev->root)
++      return false;
++
++    server->setCursor(0, 0, Point(), NULL);
++    return true;
++#endif
+   }
+
+   return false;
