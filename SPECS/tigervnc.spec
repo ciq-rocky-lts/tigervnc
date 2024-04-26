@@ -5,7 +5,7 @@
 
 Name:           tigervnc
 Version:        1.12.0
-Release:        15%{?dist}.5
+Release:        15%{?dist}.6
 Summary:        A TigerVNC remote display system
 
 %global _hardened_build 1
@@ -40,10 +40,8 @@ Patch100:       tigervnc-xserver120.patch
 # 1326867 - [RHEL7.3] GLX applications in an Xvnc session fails to start
 Patch101:       0001-rpath-hack.patch
 
-# CVE-2023-1393 tigervnc: xorg-x11-server: X.Org Server Overlay Window Use-After-Free Local Privilege Escalation Vulnerability
-Patch110:       xorg-x11-server-composite-Fix-use-after-free-of-the-COW.patch
-
 # Xorg CVEs
+Patch200:       xorg-CVE-2023-5367.patch
 Patch201:       xorg-CVE-2023-5380.patch
 Patch202:       xorg-CVE-2023-6377.patch
 Patch203:       xorg-CVE-2023-6478.patch
@@ -54,7 +52,13 @@ Patch207:       xorg-CVE-2024-0229-3.patch
 Patch208:       xorg-CVE-2024-21885.patch
 Patch209:       xorg-CVE-2024-21886-1.patch
 Patch210:       xorg-CVE-2024-21886-2.patch
-
+# Related to CVE-2024-21886
+Patch211:       xorg-dix-fix-use-after-free-in-input-device-shutdown.patch
+Patch212:       xorg-CVE-2024-31080.patch
+Patch213:       xorg-CVE-2024-31081.patch
+Patch214:       xorg-CVE-2024-31082.patch
+Patch215:       xorg-CVE-2024-31083.patch
+Patch216:       xorg-CVE-2024-31083-followup.patch
 
 BuildRequires:  gcc-c++
 BuildRequires:  libX11-devel, automake, autoconf, libtool, gettext, gettext-autopoint
@@ -177,7 +181,23 @@ for all in `find . -type f -perm -001`; do
 done
 %patch100 -p1 -b .xserver120-rebased
 %patch101 -p1 -b .rpath
-%patch110 -p1 -b .composite-Fix-use-after-free-of-the-COW
+%patch200 -p1 -b .xorg-CVE-2023-5367
+%patch201 -p1 -b .xorg-CVE-2023-5380
+%patch202 -p1 -b .xorg-CVE-2023-6377
+%patch203 -p1 -b .xorg-CVE-2023-6478
+%patch204 -p1 -b .xorg-CVE-2023-6816
+%patch205 -p1 -b .xorg-CVE-2024-0229-1
+%patch206 -p1 -b .xorg-CVE-2024-0229-2
+%patch207 -p1 -b .xorg-CVE-2024-0229-3
+%patch208 -p1 -b .xorg-CVE-2024-21885
+%patch209 -p1 -b .xorg-CVE-2024-21886-1
+%patch210 -p1 -b .xorg-CVE-2024-21886-2
+%patch211 -p1 -b .xorg-dix-fix-use-after-free-in-input-device-shutdown
+%patch212 -p1 -b .xorg-CVE-2024-31080.patch
+%patch213 -p1 -b .xorg-CVE-2024-31081.patch
+%patch214 -p1 -b .xorg-CVE-2024-31082.patch
+%patch215 -p1 -b .xorg-CVE-2024-31083.patch
+%patch216 -p1 -b .xorg-CVE-2024-31083-followup
 popd
 
 %patch1 -p1 -b .use-gnome-as-default-session
@@ -345,6 +365,9 @@ fi
 %ghost %verify(not md5 size mtime) %{_sharedstatedir}/selinux/%{selinuxtype}/active/modules/200/%{modulename}
 
 %changelog
+* Tue Jan 30 2024 mhink <mhink@ciq.com> 1.12.0-15.5
+- CVE-2024-31080 CVE-2024-31081 CVE-2024-31082 CVE-2024-31083
+
 * Tue Jan 30 2024 mhink <mhink@ciq.com> 1.12.0-15.5
 - CVE-2023-6816 CVE-2024-0229 CVE-2024-21885 CVE-2024-21886
 * Wed Jan 03 2024 mhink <mhink@ciq.com> - 1.12.0-15.4
