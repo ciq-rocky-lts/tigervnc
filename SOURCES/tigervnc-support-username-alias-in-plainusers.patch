@@ -1,0 +1,135 @@
+diff --git a/common/rfb/SSecurityPlain.cxx b/common/rfb/SSecurityPlain.cxx
+index 6f65e87..3142ba3 100644
+--- a/common/rfb/SSecurityPlain.cxx
++++ b/common/rfb/SSecurityPlain.cxx
+@@ -27,6 +27,8 @@
+ #include <rdr/InStream.h>
+ #if !defined(WIN32) && !defined(__APPLE__)
+ #include <rfb/UnixPasswordValidator.h>
++#include <unistd.h>
++#include <pwd.h>
+ #endif
+ #ifdef WIN32
+ #include <rfb/WinPasswdValidator.h>
+@@ -45,21 +47,22 @@ StringParameter PasswordValidator::plainUsers
+
+ bool PasswordValidator::validUser(const char* username)
+ {
+-  CharArray users(plainUsers.getValueStr()), user;
++  std::vector<std::string> users;
+
+-  while (users.buf) {
+-    strSplit(users.buf, ',', &user.buf, &users.buf);
+-#ifdef WIN32
+-    if (0 == stricmp(user.buf, "*"))
+-	  return true;
+-    if (0 == stricmp(user.buf, username))
+-	  return true;
+-#else
+-    if (!strcmp(user.buf, "*"))
+-	  return true;
+-    if (!strcmp(user.buf, username))
+-	  return true;
++  users = split(plainUsers, ',');
++
++  for (size_t i = 0; i < users.size(); i++) {
++    if (users[i] == "*")
++      return true;
++#if !defined(WIN32) && !defined(__APPLE__)
++    if (users[i] == "%u") {
++      struct passwd *pw = getpwnam(username);
++      if (pw && pw->pw_uid == getuid())
++        return true;
++    }
+ #endif
++    if (users[i] == username)
++      return true;
+   }
+   return false;
+ }
+diff --git a/common/rfb/util.cxx b/common/rfb/util.cxx
+index 649eb0b..cce73a0 100644
+--- a/common/rfb/util.cxx
++++ b/common/rfb/util.cxx
+@@ -99,6 +99,26 @@ namespace rfb {
+     return false;
+   }
+
++  std::vector<std::string> split(const char* src,
++                                 const char delimiter)
++  {
++    std::vector<std::string> out;
++    const char *start, *stop;
++
++    start = src;
++    do {
++      stop = strchr(start, delimiter);
++      if (stop == NULL) {
++        out.push_back(start);
++      } else {
++        out.push_back(std::string(start, stop-start));
++        start = stop + 1;
++      }
++    } while (stop != NULL);
++
++    return out;
++  }
++
+   bool strContains(const char* src, char c) {
+     int l=strlen(src);
+     for (int i=0; i<l; i++)
+diff --git a/common/rfb/util.h b/common/rfb/util.h
+index f0ac9ef..ed15c28 100644
+--- a/common/rfb/util.h
++++ b/common/rfb/util.h
+@@ -27,6 +27,9 @@
+ #include <limits.h>
+ #include <string.h>
+
++#include <string>
++#include <vector>
++
+ struct timeval;
+
+ #ifdef __GNUC__
+@@ -76,6 +79,10 @@ namespace rfb {
+   // that part of the string.  Obviously, setting both to 0 is not useful...
+   bool strSplit(const char* src, const char limiter, char** out1, char** out2, bool fromEnd=false);
+
++  // Splits a string with the specified delimiter
++  std::vector<std::string> split(const char* src,
++                                 const char delimiter);
++
+   // Returns true if src contains c
+   bool strContains(const char* src, char c);
+
+diff --git a/unix/x0vncserver/x0vncserver.man b/unix/x0vncserver/x0vncserver.man
+index c36ae34..78db730 100644
+--- a/unix/x0vncserver/x0vncserver.man
++++ b/unix/x0vncserver/x0vncserver.man
+@@ -125,8 +125,8 @@ parameter instead.
+ .B \-PlainUsers \fIuser-list\fP
+ A comma separated list of user names that are allowed to authenticate via
+ any of the "Plain" security types (Plain, TLSPlain, etc.). Specify \fB*\fP
+-to allow any user to authenticate using this security type. Default is to
+-deny all users.
++to allow any user to authenticate using this security type. Specify \fB%u\fP
++to allow the user of the server process. Default is to deny all users.
+ .
+ .TP
+ .B \-pam_service \fIname\fP, \-PAMService \fIname\fP
+diff --git a/unix/xserver/hw/vnc/Xvnc.man b/unix/xserver/hw/vnc/Xvnc.man
+index ea87dea..e9fb654 100644
+--- a/unix/xserver/hw/vnc/Xvnc.man
++++ b/unix/xserver/hw/vnc/Xvnc.man
+@@ -200,8 +200,8 @@ parameter instead.
+ .B \-PlainUsers \fIuser-list\fP
+ A comma separated list of user names that are allowed to authenticate via
+ any of the "Plain" security types (Plain, TLSPlain, etc.). Specify \fB*\fP
+-to allow any user to authenticate using this security type. Default is to
+-deny all users.
++to allow any user to authenticate using this security type. Specify \fB%u\fP
++to allow the user of the server process. Default is to deny all users.
+ .
+ .TP
+ .B \-pam_service \fIname\fP, \-PAMService \fIname\fP
