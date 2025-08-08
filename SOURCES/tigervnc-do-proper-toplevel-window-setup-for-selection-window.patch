@@ -1,0 +1,22 @@
+From 9e15952d02e01b8e19e7459bcabcd47dc63a1726 Mon Sep 17 00:00:00 2001
+From: Pierre Ossman <ossman@cendio.se>
+Date: Tue, 22 Oct 2024 09:59:30 +0200
+Subject: [PATCH] Do proper top level window setup for selection window
+
+---
+ unix/x0vncserver/XSelection.cxx | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/unix/x0vncserver/XSelection.cxx b/unix/x0vncserver/XSelection.cxx
+index 72dd537f4..c724d2ac4 100644
+--- a/unix/x0vncserver/XSelection.cxx
++++ b/unix/x0vncserver/XSelection.cxx
+@@ -37,7 +37,7 @@ XSelection::XSelection(Display* dpy_, XSelectionHandler* handler_)
+   probeProperty = XInternAtom(dpy, "TigerVNC_ProbeProperty", False);
+   transferProperty = XInternAtom(dpy, "TigerVNC_TransferProperty", False);
+   timestampProperty = XInternAtom(dpy, "TigerVNC_TimestampProperty", False);
+-  setName("TigerVNC Clipboard (x0vncserver)");
++  toplevel("TigerVNC Clipboard (x0vncserver)");
+   addEventMask(PropertyChangeMask); // Required for PropertyNotify events
+ }
+ 

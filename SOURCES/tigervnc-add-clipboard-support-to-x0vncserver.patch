@@ -1,0 +1,543 @@
+From c23be952f50ba34c49134b6280ce503f154dc9bc Mon Sep 17 00:00:00 2001
+From: Gaurav Ujjwal <gujjwal00@gmail.com>
+Date: Wed, 25 Sep 2024 21:21:26 +0530
+Subject: [PATCH] Add clipboard support to x0vncserver
+
+---
+ unix/tx/TXWindow.cxx             |  13 ++-
+ unix/tx/TXWindow.h               |   3 +-
+ unix/x0vncserver/CMakeLists.txt  |   1 +
+ unix/x0vncserver/XDesktop.cxx    |  49 +++++++-
+ unix/x0vncserver/XDesktop.h      |  13 ++-
+ unix/x0vncserver/XSelection.cxx  | 195 +++++++++++++++++++++++++++++++
+ unix/x0vncserver/XSelection.h    |  58 +++++++++
+ unix/x0vncserver/x0vncserver.cxx |   5 -
+ unix/x0vncserver/x0vncserver.man |  21 ++++
+ 9 files changed, 344 insertions(+), 14 deletions(-)
+ create mode 100644 unix/x0vncserver/XSelection.cxx
+ create mode 100644 unix/x0vncserver/XSelection.h
+
+diff --git a/unix/tx/TXWindow.cxx b/unix/tx/TXWindow.cxx
+index ee097e4..b10ed84 100644
+--- a/unix/tx/TXWindow.cxx
++++ b/unix/tx/TXWindow.cxx
+@@ -36,7 +36,7 @@ std::list<TXWindow*> windows;
+ 
+ Atom wmProtocols, wmDeleteWindow, wmTakeFocus;
+ Atom xaTIMESTAMP, xaTARGETS, xaSELECTION_TIME, xaSELECTION_STRING;
+-Atom xaCLIPBOARD;
++Atom xaCLIPBOARD, xaUTF8_STRING, xaINCR;
+ unsigned long TXWindow::black, TXWindow::white;
+ unsigned long TXWindow::defaultFg, TXWindow::defaultBg;
+ unsigned long TXWindow::lightBg, TXWindow::darkBg;
+@@ -65,6 +65,8 @@ void TXWindow::init(Display* dpy, const char* defaultWindowClass_)
+   xaSELECTION_TIME = XInternAtom(dpy, "SELECTION_TIME", False);
+   xaSELECTION_STRING = XInternAtom(dpy, "SELECTION_STRING", False);
+   xaCLIPBOARD = XInternAtom(dpy, "CLIPBOARD", False);
++  xaUTF8_STRING = XInternAtom(dpy, "UTF8_STRING", False);
++  xaINCR = XInternAtom(dpy, "INCR", False);
+   XColor cols[6];
+   cols[0].red = cols[0].green = cols[0].blue = 0x0000;
+   cols[1].red = cols[1].green = cols[1].blue = 0xbbbb;
+@@ -462,17 +464,18 @@ void TXWindow::handleXEvent(XEvent* ev)
+       } else {
+         se.property = ev->xselectionrequest.property;
+         if (se.target == xaTARGETS) {
+-          Atom targets[2];
++          Atom targets[3];
+           targets[0] = xaTIMESTAMP;
+           targets[1] = XA_STRING;
++          targets[2] = xaUTF8_STRING;
+           XChangeProperty(dpy, se.requestor, se.property, XA_ATOM, 32,
+-                          PropModeReplace, (unsigned char*)targets, 2);
++                          PropModeReplace, (unsigned char*)targets, 3);
+         } else if (se.target == xaTIMESTAMP) {
+           Time t = selectionOwnTime[se.selection];
+           XChangeProperty(dpy, se.requestor, se.property, XA_INTEGER, 32,
+                           PropModeReplace, (unsigned char*)&t, 1);
+-        } else if (se.target == XA_STRING) {
+-          if (!selectionRequest(se.requestor, se.selection, se.property))
++        } else if (se.target == XA_STRING || se.target == xaUTF8_STRING) {
++          if (!selectionRequest(se.requestor, se.selection, se.target, se.property))
+             se.property = None;
+         } else {
+           se.property = None;
+diff --git a/unix/tx/TXWindow.h b/unix/tx/TXWindow.h
+index 223c07a..32ae9a3 100644
+--- a/unix/tx/TXWindow.h
++++ b/unix/tx/TXWindow.h
+@@ -155,6 +155,7 @@ public:
+   // returning true if successful, false otherwise.
+   virtual bool selectionRequest(Window /*requestor*/,
+                                 Atom /*selection*/,
++                                Atom /*target*/,
+                                 Atom /*property*/) { return false;}
+ 
+   // Static methods
+@@ -224,6 +225,6 @@ private:
+ 
+ extern Atom wmProtocols, wmDeleteWindow, wmTakeFocus;
+ extern Atom xaTIMESTAMP, xaTARGETS, xaSELECTION_TIME, xaSELECTION_STRING;
+-extern Atom xaCLIPBOARD;
++extern Atom xaCLIPBOARD, xaUTF8_STRING, xaINCR;
+ 
+ #endif
+diff --git a/unix/x0vncserver/CMakeLists.txt b/unix/x0vncserver/CMakeLists.txt
+index 5ce9577..9d6d213 100644
+--- a/unix/x0vncserver/CMakeLists.txt
++++ b/unix/x0vncserver/CMakeLists.txt
+@@ -11,6 +11,7 @@ add_executable(x0vncserver
+   XPixelBuffer.cxx
+   XDesktop.cxx
+   RandrGlue.c
++  XSelection.cxx
+   ../vncconfig/QueryConnectDialog.cxx
+ )
+ 
+diff --git a/unix/x0vncserver/XDesktop.cxx b/unix/x0vncserver/XDesktop.cxx
+index 1e52987..db5b6ae 100644
+--- a/unix/x0vncserver/XDesktop.cxx
++++ b/unix/x0vncserver/XDesktop.cxx
+@@ -43,6 +43,7 @@
+ #endif
+ #ifdef HAVE_XFIXES
+ #include <X11/extensions/Xfixes.h>
++#include <X11/Xatom.h>
+ #endif
+ #ifdef HAVE_XRANDR
+ #include <X11/extensions/Xrandr.h>
+@@ -81,7 +82,7 @@ static const char * ledNames[XDESKTOP_N_LEDS] = {
+ 
+ XDesktop::XDesktop(Display* dpy_, Geometry *geometry_)
+   : dpy(dpy_), geometry(geometry_), pb(0), server(0),
+-    queryConnectDialog(0), queryConnectSock(0),
++    queryConnectDialog(0), queryConnectSock(0), selection(dpy_, this),
+     oldButtonMask(0), haveXtest(false), haveDamage(false),
+     maxButtons(0), running(false), ledMasks(), ledState(0),
+     codeMap(0), codeMapLen(0)
+@@ -179,10 +180,15 @@ XDesktop::XDesktop(Display* dpy_, Geometry *geometry_)
+   if (XFixesQueryExtension(dpy, &xfixesEventBase, &xfixesErrorBase)) {
+     XFixesSelectCursorInput(dpy, DefaultRootWindow(dpy),
+                             XFixesDisplayCursorNotifyMask);
++
++    XFixesSelectSelectionInput(dpy, DefaultRootWindow(dpy), XA_PRIMARY,
++                               XFixesSetSelectionOwnerNotifyMask);
++    XFixesSelectSelectionInput(dpy, DefaultRootWindow(dpy), xaCLIPBOARD,
++                               XFixesSetSelectionOwnerNotifyMask);
+   } else {
+ #endif
+     vlog.info("XFIXES extension not present");
+-    vlog.info("Will not be able to display cursors");
++    vlog.info("Will not be able to display cursors or monitor clipboard");
+ #ifdef HAVE_XFIXES
+   }
+ #endif
+@@ -892,6 +898,20 @@ bool XDesktop::handleGlobalEvent(XEvent* ev) {
+       return false;
+ 
+     return setCursor();
++  }
++  else if (ev->type == xfixesEventBase + XFixesSelectionNotify) {
++    XFixesSelectionNotifyEvent* sev = (XFixesSelectionNotifyEvent*)ev;
++
++    if (!running)
++      return true;
++
++    if (sev->subtype != XFixesSetSelectionOwnerNotify)
++      return false;
++
++    selection.handleSelectionOwnerChange(sev->owner, sev->selection,
++                                         sev->timestamp);
++
++    return true;
+ #endif
+ #ifdef HAVE_XRANDR
+   } else if (ev->type == Expose) {
+@@ -1039,3 +1059,28 @@ bool XDesktop::setCursor()
+   return true;
+ }
+ #endif
++
++// X selection availability changed, let VNC clients know
++void XDesktop::handleXSelectionAnnounce(bool available) {
++  server->announceClipboard(available);
++}
++
++// A VNC client wants data, send request to selection owner
++void XDesktop::handleClipboardRequest() { 
++  selection.requestSelectionData(); 
++}
++
++// Data is available, send it to clients
++void XDesktop::handleXSelectionData(const char* data) {
++  server->sendClipboardData(data);
++}
++
++// When a client says it has clipboard data, request it 
++void XDesktop::handleClipboardAnnounce(bool available) {
++   if(available) server->requestClipboard();
++}
++
++// Client has sent the data
++void XDesktop::handleClipboardData(const char* data) {
++  if (data) selection.handleClientClipboardData(data);
++}
+diff --git a/unix/x0vncserver/XDesktop.h b/unix/x0vncserver/XDesktop.h
+index 4777a65..bc8d2a9 100644
+--- a/unix/x0vncserver/XDesktop.h
++++ b/unix/x0vncserver/XDesktop.h
+@@ -32,6 +32,8 @@
+ 
+ #include <vncconfig/QueryConnectDialog.h>
+ 
++#include "XSelection.h"
++
+ class Geometry;
+ class XPixelBuffer;
+ 
+@@ -46,7 +48,8 @@ struct AddedKeySym
+ 
+ class XDesktop : public rfb::SDesktop,
+                  public TXGlobalEventHandler,
+-                 public QueryResultCallback
++                 public QueryResultCallback,
++                 public XSelectionHandler
+ {
+ public:
+   XDesktop(Display* dpy_, Geometry *geometry);
+@@ -65,6 +68,13 @@ public:
+   virtual void clientCutText(const char* str);
+   virtual unsigned int setScreenLayout(int fb_width, int fb_height,
+                                        const rfb::ScreenSet& layout);
++  void handleClipboardRequest() override;
++  void handleClipboardAnnounce(bool available) override;
++  void handleClipboardData(const char* data) override;
++
++  // -=- XSelectionHandler interface
++  void handleXSelectionAnnounce(bool available) override;
++  void handleXSelectionData(const char* data) override;
+ 
+   // -=- TXGlobalEventHandler interface
+   virtual bool handleGlobalEvent(XEvent* ev);
+@@ -80,6 +90,7 @@ protected:
+   rfb::VNCServer* server;
+   QueryConnectDialog* queryConnectDialog;
+   network::Socket* queryConnectSock;
++  XSelection selection;
+   int oldButtonMask;
+   bool haveXtest;
+   bool haveDamage;
+diff --git a/unix/x0vncserver/XSelection.cxx b/unix/x0vncserver/XSelection.cxx
+new file mode 100644
+index 0000000..72dd537
+--- /dev/null
++++ b/unix/x0vncserver/XSelection.cxx
+@@ -0,0 +1,195 @@
++/* Copyright (C) 2024 Gaurav Ujjwal.  All Rights Reserved.
++ *
++ * This is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This software is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this software; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307,
++ * USA.
++ */
++
++#include <X11/Xatom.h>
++#include <rfb/Configuration.h>
++#include <rfb/LogWriter.h>
++#include <rfb/util.h>
++#include <x0vncserver/XSelection.h>
++
++rfb::BoolParameter setPrimary("SetPrimary",
++                              "Set the PRIMARY as well as the CLIPBOARD selection",
++                              true);
++rfb::BoolParameter sendPrimary("SendPrimary",
++                               "Send the PRIMARY as well as the CLIPBOARD selection",
++                               true);
++
++static rfb::LogWriter vlog("XSelection");
++
++XSelection::XSelection(Display* dpy_, XSelectionHandler* handler_)
++    : TXWindow(dpy_, 1, 1, nullptr), handler(handler_), announcedSelection(None)
++{
++  probeProperty = XInternAtom(dpy, "TigerVNC_ProbeProperty", False);
++  transferProperty = XInternAtom(dpy, "TigerVNC_TransferProperty", False);
++  timestampProperty = XInternAtom(dpy, "TigerVNC_TimestampProperty", False);
++  setName("TigerVNC Clipboard (x0vncserver)");
++  addEventMask(PropertyChangeMask); // Required for PropertyNotify events
++}
++
++static Bool PropertyEventMatcher(Display* /* dpy */, XEvent* ev, XPointer prop)
++{
++  if (ev->type == PropertyNotify && ev->xproperty.atom == *((Atom*)prop))
++    return True;
++  else
++    return False;
++}
++
++Time XSelection::getXServerTime()
++{
++  XEvent ev;
++  uint8_t data = 0;
++
++  // Trigger a PropertyNotify event to extract server time
++  XChangeProperty(dpy, win(), timestampProperty, XA_STRING, 8, PropModeReplace,
++                  &data, sizeof(data));
++  XIfEvent(dpy, &ev, &PropertyEventMatcher, (XPointer)&timestampProperty);
++  return ev.xproperty.time;
++}
++
++// Takes ownership of selections, backed by given data.
++void XSelection::handleClientClipboardData(const char* data)
++{
++  vlog.debug("Received client clipboard data, taking selection ownership");
++
++  Time time = getXServerTime();
++  ownSelection(xaCLIPBOARD, time);
++  if (!selectionOwner(xaCLIPBOARD))
++    vlog.error("Unable to own CLIPBOARD selection");
++
++  if (setPrimary) {
++    ownSelection(XA_PRIMARY, time);
++    if (!selectionOwner(XA_PRIMARY))
++      vlog.error("Unable to own PRIMARY selection");
++  }
++
++  if (selectionOwner(xaCLIPBOARD) || selectionOwner(XA_PRIMARY))
++    clientData = data;
++}
++
++// We own the selection and another X app has asked for data
++bool XSelection::selectionRequest(Window requestor, Atom selection, Atom target,
++                                  Atom property)
++{
++  if (clientData.empty() || requestor == win() || !selectionOwner(selection))
++    return false;
++
++  if (target == XA_STRING) {
++    std::string latin1 = rfb::utf8ToLatin1(clientData.data(), clientData.length());
++    XChangeProperty(dpy, requestor, property, XA_STRING, 8, PropModeReplace,
++                    (unsigned char*)latin1.data(), latin1.length());
++    return true;
++  }
++
++  if (target == xaUTF8_STRING) {
++    XChangeProperty(dpy, requestor, property, xaUTF8_STRING, 8, PropModeReplace,
++                    (unsigned char*)clientData.data(), clientData.length());
++    return true;
++  }
++
++  return false;
++}
++
++// Selection-owner change implies a change in selection data.
++void XSelection::handleSelectionOwnerChange(Window owner, Atom selection, Time time)
++{
++  if (selection != XA_PRIMARY && selection != xaCLIPBOARD)
++    return;
++  if (selection == XA_PRIMARY && !sendPrimary)
++    return;
++
++  if (selection == announcedSelection)
++    announceSelection(None);
++
++  if (owner == None || owner == win())
++    return;
++
++  if (!selectionOwner(XA_PRIMARY) && !selectionOwner(xaCLIPBOARD))
++    clientData = "";
++
++  XConvertSelection(dpy, selection, xaTARGETS, probeProperty, win(), time);
++}
++
++void XSelection::announceSelection(Atom selection)
++{
++  announcedSelection = selection;
++  handler->handleXSelectionAnnounce(selection != None);
++}
++
++void XSelection::requestSelectionData()
++{
++  if (announcedSelection != None)
++    XConvertSelection(dpy, announcedSelection, xaTARGETS, transferProperty, win(),
++                      CurrentTime);
++}
++
++// Some information about selection is received from current owner
++void XSelection::selectionNotify(XSelectionEvent* ev, Atom type, int format,
++                                 int nitems, void* data)
++{
++  if (!ev || !data || type == None)
++    return;
++
++  if (ev->target == xaTARGETS) {
++    if (format != 32 || type != XA_ATOM)
++      return;
++
++    Atom* targets = (Atom*)data;
++    bool utf8Supported = false;
++    bool stringSupported = false;
++
++    for (int i = 0; i < nitems; i++) {
++      if (targets[i] == xaUTF8_STRING)
++        utf8Supported = true;
++      else if (targets[i] == XA_STRING)
++        stringSupported = true;
++    }
++
++    if (ev->property == probeProperty) {
++      // Only probing for now, will issue real request when client asks for data
++      if (stringSupported || utf8Supported)
++        announceSelection(ev->selection);
++      return;
++    }
++
++    // Prefer UTF-8 if available
++    if (utf8Supported)
++      XConvertSelection(dpy, ev->selection, xaUTF8_STRING, transferProperty, win(),
++                        ev->time);
++    else if (stringSupported)
++      XConvertSelection(dpy, ev->selection, XA_STRING, transferProperty, win(),
++                        ev->time);
++  } else if (ev->target == xaUTF8_STRING || ev->target == XA_STRING) {
++    if (type == xaINCR) {
++      // Incremental transfer is not supported
++      vlog.debug("Selected data is too big!");
++      return;
++    }
++
++    if (format != 8)
++      return;
++
++    if (type == xaUTF8_STRING) {
++      std::string result = rfb::convertLF((char*)data, nitems);
++      handler->handleXSelectionData(result.c_str());
++    } else if (type == XA_STRING) {
++      std::string result = rfb::convertLF((char*)data, nitems);
++      result = rfb::latin1ToUTF8(result.data(), result.length());
++      handler->handleXSelectionData(result.c_str());
++    }
++  }
++}
+\ No newline at end of file
+diff --git a/unix/x0vncserver/XSelection.h b/unix/x0vncserver/XSelection.h
+new file mode 100644
+index 0000000..fbe1f29
+--- /dev/null
++++ b/unix/x0vncserver/XSelection.h
+@@ -0,0 +1,58 @@
++/* Copyright (C) 2024 Gaurav Ujjwal.  All Rights Reserved.
++ *
++ * This is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This software is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this software; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307,
++ * USA.
++ */
++
++#ifndef __XSELECTION_H__
++#define __XSELECTION_H__
++
++#include <string>
++#include <tx/TXWindow.h>
++
++class XSelectionHandler
++{
++public:
++  virtual void handleXSelectionAnnounce(bool available) = 0;
++  virtual void handleXSelectionData(const char* data) = 0;
++};
++
++class XSelection : TXWindow
++{
++public:
++  XSelection(Display* dpy_, XSelectionHandler* handler_);
++
++  void handleSelectionOwnerChange(Window owner, Atom selection, Time time);
++  void requestSelectionData();
++  void handleClientClipboardData(const char* data);
++
++private:
++  XSelectionHandler* handler;
++  Atom probeProperty;
++  Atom transferProperty;
++  Atom timestampProperty;
++  Atom announcedSelection;
++  std::string clientData; // Always in UTF-8
++
++  Time getXServerTime();
++  void announceSelection(Atom selection);
++
++  bool selectionRequest(Window requestor, Atom selection, Atom target,
++                        Atom property) override;
++  void selectionNotify(XSelectionEvent* ev, Atom type, int format, int nitems,
++                       void* data) override;
++};
++
++#endif
+diff --git a/unix/x0vncserver/x0vncserver.cxx b/unix/x0vncserver/x0vncserver.cxx
+index d2999e2..b31450b 100644
+--- a/unix/x0vncserver/x0vncserver.cxx
++++ b/unix/x0vncserver/x0vncserver.cxx
+@@ -281,11 +281,6 @@ int main(int argc, char** argv)
+ 
+   Configuration::enableServerParams();
+ 
+-  // FIXME: We don't support clipboard yet
+-  Configuration::removeParam("AcceptCutText");
+-  Configuration::removeParam("SendCutText");
+-  Configuration::removeParam("MaxCutText");
+-
+   // Assume different defaults when socket activated
+   if (hasSystemdListeners())
+     rfbport.setParam(-1);
+diff --git a/unix/x0vncserver/x0vncserver.man b/unix/x0vncserver/x0vncserver.man
+index 347e50e..5bc8807 100644
+--- a/unix/x0vncserver/x0vncserver.man
++++ b/unix/x0vncserver/x0vncserver.man
+@@ -222,6 +222,27 @@ Accept pointer movement and button events from clients. Default is on.
+ Accept requests to resize the size of the desktop. Default is on.
+ .
+ .TP
++.B \-AcceptCutText
++Accept clipboard updates from clients. Default is on.
++.
++.TP
++.B \-SetPrimary
++Set the PRIMARY as well as the CLIPBOARD selection. Default is on.
++.
++.TP
++.B \-MaxCutText \fIbytes\fP
++The maximum permitted size of an incoming clipboard update.
++Default is \fB262144\fP.
++.
++.TP
++.B \-SendCutText
++Send clipboard changes to clients. Default is on.
++.
++.TP
++.B \-SendPrimary
++Send the PRIMARY as well as the CLIPBOARD selection to clients. Default is on.
++.
++.TP
+ .B \-RemapKeys \fImapping
+ Sets up a keyboard mapping.
+ .I mapping
