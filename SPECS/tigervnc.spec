@@ -4,8 +4,8 @@
 %global modulename vncsession
 
 Name:           tigervnc
-Version:        1.12.0
-Release:        15%{?dist}.6
+Version:        1.15.0
+Release:        7%{?dist}
 Summary:        A TigerVNC remote display system
 
 %global _hardened_build 1
@@ -13,7 +13,7 @@ Summary:        A TigerVNC remote display system
 License:        GPLv2+
 URL:            http://www.tigervnc.com
 
-Source0:        %{name}-%{version}.tar.gz
+Source0:        https://github.com/TigerVNC/%{name}/archive/v%{version}.tar.gz#/%{name}-%{version}.tar.gz
 Source1:        xvnc.service
 Source2:        xvnc.socket
 Source3:        10-libvnc.conf
@@ -21,67 +21,102 @@ Source3:        10-libvnc.conf
 # Backwards compatibility
 Source5:        vncserver
 
+# Downstream patches
 Patch1:         tigervnc-use-gnome-as-default-session.patch
+# https://github.com/TigerVNC/tigervnc/pull/1425
+Patch2:         tigervnc-vncsession-restore-script-systemd-service.patch
+Patch3:         tigervnc-dont-install-appstream-metadata-file.patch
+# Only warn about passwords longer than 8 characters, but allow them to be used as in the past
+Patch4:         tigervnc-allow-use-of-passwords-longer-than-eight-characters.patch
+# https://github.com/TigerVNC/tigervnc/pull/1792
+Patch5:         tigervnc-add-option-allowing-to-connect-only-user-owning-session.patch
 
 # Upstream patches
-Patch50:        tigervnc-selinux-restore-context-in-case-of-different-policies.patch
-Patch51:        tigervnc-fix-typo-in-mirror-monitor-detection.patch
-Patch52:        tigervnc-root-user-selinux-context.patch
-Patch53:        tigervnc-vncsession-restore-script-systemd-service.patch
-# https://github.com/TigerVNC/tigervnc/pull/1513
-Patch54:        tigervnc-fix-ghost-cursor-in-zaphod-mode.patch
-# https://github.com/TigerVNC/tigervnc/pull/1510
-Patch55:        tigervnc-add-new-keycodes-for-unknown-keysyms.patch
-Patch56:        tigervnc-sanity-check-when-cleaning-up-keymap-changes.patch
-Patch57:        tigervnc-selinux-allow-vncsession-create-vnc-directory.patch
+Patch50:        tigervnc-add-selinux-policy-rules-allowing-create-dirs-under-root-dir.patch
+Patch51:        tigervnc-add-selinux-policy-rules-allowing-access-to-proc-sys-fs-nr-open.patch
+Patch52:        tigervnc-dont-print-xvnc-banner-before-parsing-args.patch
 
-# This is tigervnc-%%{version}/unix/xserver116.patch rebased on the latest xorg
-Patch100:       tigervnc-xserver120.patch
+# Upstreamable patches
+
 # 1326867 - [RHEL7.3] GLX applications in an Xvnc session fails to start
-Patch101:       0001-rpath-hack.patch
+Patch100:       0001-rpath-hack.patch
 
-# Xorg CVEs
-Patch200:       xorg-CVE-2023-5367.patch
-Patch201:       xorg-CVE-2023-5380.patch
-Patch202:       xorg-CVE-2023-6377.patch
-Patch203:       xorg-CVE-2023-6478.patch
-Patch204:       xorg-CVE-2023-6816.patch
-Patch205:       xorg-CVE-2024-0229-1.patch
-Patch206:       xorg-CVE-2024-0229-2.patch
-Patch207:       xorg-CVE-2024-0229-3.patch
-Patch208:       xorg-CVE-2024-21885.patch
-Patch209:       xorg-CVE-2024-21886-1.patch
-Patch210:       xorg-CVE-2024-21886-2.patch
-# Related to CVE-2024-21886
-Patch211:       xorg-dix-fix-use-after-free-in-input-device-shutdown.patch
-Patch212:       xorg-CVE-2024-31080.patch
-Patch213:       xorg-CVE-2024-31081.patch
-Patch214:       xorg-CVE-2024-31082.patch
-Patch215:       xorg-CVE-2024-31083.patch
-Patch216:       xorg-CVE-2024-31083-followup.patch
+# XServer patches
+Patch200:       xorg-CVE-2025-26594.patch
+Patch201:       xorg-CVE-2025-26594-2.patch
+Patch202:       xorg-CVE-2025-26595.patch
+Patch203:       xorg-CVE-2025-26596.patch
+Patch204:       xorg-CVE-2025-26597.patch
+Patch205:       xorg-CVE-2025-26598.patch
+Patch206:       xorg-CVE-2025-26599.patch
+Patch207:       xorg-CVE-2025-26599-2.patch
+Patch208:       xorg-CVE-2025-26600.patch
+Patch209:       xorg-CVE-2025-26601.patch
+Patch210:       xorg-CVE-2025-26601-2.patch
+Patch211:       xorg-CVE-2025-26601-3.patch
+Patch212:       xorg-CVE-2025-26601-4.patch
+Patch213:       xorg-CVE-2025-49175.patch
+Patch214:       xorg-CVE-2025-49176-1.patch
+Patch215:       xorg-CVE-2025-49176-2.patch
+Patch216:       xorg-CVE-2025-49178.patch
+Patch217:       xorg-CVE-2025-49179.patch
+Patch218:       xorg-CVE-2025-49180.patch
 
+BuildRequires:  make
 BuildRequires:  gcc-c++
-BuildRequires:  libX11-devel, automake, autoconf, libtool, gettext, gettext-autopoint
-BuildRequires:  libXext-devel, xorg-x11-server-source, libXi-devel
-BuildRequires:  xorg-x11-xtrans-devel, xorg-x11-util-macros, libXtst-devel
-BuildRequires:  libxkbfile-devel, openssl-devel, libpciaccess-devel
-BuildRequires:  mesa-libGL-devel, libXinerama-devel, xorg-x11-font-utils
-BuildRequires:  freetype-devel, libXdmcp-devel, libxshmfence-devel
-BuildRequires:  libjpeg-turbo-devel, gnutls-devel, pam-devel
-BuildRequires:  libdrm-devel, libXt-devel, pixman-devel
-BuildRequires:  systemd, cmake, desktop-file-utils
-BuildRequires:  libselinux-devel, selinux-policy-devel
-BuildRequires:  libXfixes-devel, libXdamage-devel, libXrandr-devel
-%if 0%{?fedora} > 24 || 0%{?rhel} >= 7
-BuildRequires:  libXfont2-devel
-%else
-BuildRequires:  libXfont-devel
-%endif
+BuildRequires:  gettext
+BuildRequires:  cmake
+
+BuildRequires:  gnutls-devel
+BuildRequires:  desktop-file-utils
+BuildRequires:  libappstream-glib
+BuildRequires:  libjpeg-turbo-devel
+BuildRequires:  openssl-devel
+BuildRequires:  pam-devel
+BuildRequires:  zlib-devel
 
 # TigerVNC 1.4.x requires fltk 1.3.3 for keyboard handling support
 # See https://github.com/TigerVNC/tigervnc/issues/8, also bug #1208814
 BuildRequires:  fltk-devel >= 1.3.3
+BuildRequires:  libX11-devel
+BuildRequires:  libXext-devel
+BuildRequires:  libXi-devel
+BuildRequires:  libXrandr-devel
+BuildRequires:  libXrender-devel
+BuildRequires:  pixman-devel
+
+# X11/graphics dependencies
+BuildRequires:  autoconf
+BuildRequires:  automake
+BuildRequires:  gettext-autopoint
+BuildRequires:  libXdamage-devel
+BuildRequires:  libXdmcp-devel
+BuildRequires:  libXfixes-devel
+BuildRequires:  libXfont2-devel
+BuildRequires:  libXinerama-devel
+BuildRequires:  libXt-devel
+BuildRequires:  libXtst-devel
+BuildRequires:  libdrm-devel
+BuildRequires:  mesa-libgbm-devel
+BuildRequires:  libtool
+BuildRequires:  libxkbfile-devel
+BuildRequires:  libxshmfence-devel
+BuildRequires:  mesa-libGL-devel
+BuildRequires:  pkgconfig(fontutil)
+BuildRequires:  pkgconfig(xkbcomp)
 BuildRequires:  xorg-x11-server-devel
+BuildRequires:  xorg-x11-server-source
+BuildRequires:  xorg-x11-util-macros
+BuildRequires:  xorg-x11-xtrans-devel
+
+# SELinux
+BuildRequires:  libselinux-devel
+BuildRequires:  selinux-policy-devel
+
+# For RHEL-91104
+BuildRequires:  pkgconfig(dbus-1) >= 1.0
+BuildRequires:  pkgconfig(libsystemd) >= 209
+BuildRequires:  pkgconfig(libudev) >= 143
 
 Requires(post): coreutils
 Requires(postun):coreutils
@@ -89,6 +124,7 @@ Requires(postun):coreutils
 Requires:       hicolor-icon-theme
 Requires:       tigervnc-license
 Requires:       tigervnc-icons
+Requires:       which
 
 %description
 Virtual Network Computing (VNC) is a remote display system which
@@ -119,11 +155,16 @@ X session.
 
 %package server-minimal
 Summary:        A minimal installation of TigerVNC server
-Requires(post): chkconfig
-Requires(preun):chkconfig
+Requires(post): systemd
+Requires(preun): systemd
+Requires(postun): systemd
+Requires(post): systemd
 
-Requires:       mesa-dri-drivers, xkeyboard-config, xorg-x11-xkb-utils
-Requires:       tigervnc-license, dbus-x11
+Requires:       dbus-x11
+Requires:       mesa-dri-drivers
+Requires:       tigervnc-license
+Requires:       xkbcomp
+Requires:       xkeyboard-config
 
 %description server-minimal
 The VNC system allows you to access the same desktop from a wide
@@ -179,38 +220,42 @@ pushd unix/xserver
 for all in `find . -type f -perm -001`; do
         chmod -x "$all"
 done
-%patch100 -p1 -b .xserver120-rebased
-%patch101 -p1 -b .rpath
-%patch200 -p1 -b .xorg-CVE-2023-5367
-%patch201 -p1 -b .xorg-CVE-2023-5380
-%patch202 -p1 -b .xorg-CVE-2023-6377
-%patch203 -p1 -b .xorg-CVE-2023-6478
-%patch204 -p1 -b .xorg-CVE-2023-6816
-%patch205 -p1 -b .xorg-CVE-2024-0229-1
-%patch206 -p1 -b .xorg-CVE-2024-0229-2
-%patch207 -p1 -b .xorg-CVE-2024-0229-3
-%patch208 -p1 -b .xorg-CVE-2024-21885
-%patch209 -p1 -b .xorg-CVE-2024-21886-1
-%patch210 -p1 -b .xorg-CVE-2024-21886-2
-%patch211 -p1 -b .xorg-dix-fix-use-after-free-in-input-device-shutdown
-%patch212 -p1 -b .xorg-CVE-2024-31080.patch
-%patch213 -p1 -b .xorg-CVE-2024-31081.patch
-%patch214 -p1 -b .xorg-CVE-2024-31082.patch
-%patch215 -p1 -b .xorg-CVE-2024-31083.patch
-%patch216 -p1 -b .xorg-CVE-2024-31083-followup
+%patch -P100 -p1 -b .rpath
+cat ../xserver120.patch | patch -p1
+
+%patch -P200 -p1 -b .xorg-CVE-2025-26594
+%patch -P201 -p1 -b .xorg-CVE-2025-26594-2
+%patch -P202 -p1 -b .xorg-CVE-2025-26595
+%patch -P203 -p1 -b .xorg-CVE-2025-26596
+%patch -P204 -p1 -b .xorg-CVE-2025-26597
+%patch -P205 -p1 -b .xorg-CVE-2025-26598
+%patch -P206 -p1 -b .xorg-CVE-2025-26599
+%patch -P207 -p1 -b .xorg-CVE-2025-26599-2
+%patch -P208 -p1 -b .xorg-CVE-2025-26600
+%patch -P209 -p1 -b .xorg-CVE-2025-26601
+%patch -P210 -p1 -b .xorg-CVE-2025-26601-2
+%patch -P211 -p1 -b .xorg-CVE-2025-26601-3
+%patch -P212 -p1 -b .xorg-CVE-2025-26601-4
+%patch -P213 -p1 -b .xorg-CVE-2025-49175
+%patch -P214 -p1 -b .xorg-CVE-2025-49176-1
+%patch -P215 -p1 -b .xorg-CVE-2025-49176-2
+%patch -P216 -p1 -b .xorg-CVE-2025-49178
+%patch -P217 -p1 -b .xorg-CVE-2025-49179
+%patch -P218 -p1 -b .xorg-CVE-2025-49180
 popd
 
-%patch1 -p1 -b .use-gnome-as-default-session
+%patch -P1 -p1 -b .use-gnome-as-default-session
+%patch -P2 -p1 -b .vncsession-restore-script-systemd-service
+%patch -P3 -p1 -b .dont-install-appstream-metadata-file.patch
+%patch -P4 -p1 -b .allow-use-of-passwords-longer-than-eight-characters
+%patch -P5 -p1 -b .add-option-allowing-to-connect-only-user-owning-session
 
 # Upstream patches
-%patch50 -p1 -b .selinux-restore-context-in-case-of-different-policies
-%patch51 -p1 -b .fix-typo-in-mirror-monitor-detection
-%patch52 -p1 -b .root-user-selinux-context
-%patch53 -p1 -b .vncsession-restore-script-systemd-service
-%patch54 -p1 -b .fix-ghost-cursor-in-zaphod-mode
-%patch55 -p1 -b .add-new-keycodes-for-unknown-keysyms
-%patch56 -p1 -b .sanity-check-when-cleaning-up-keymap-changes
-%patch57 -p1 -b .selinux-allow-vncsession-create-vnc-directory
+%patch -P50 -p1 -b .add-selinux-policy-rules-allowing-create-dirs-under-root-dir
+%patch -P51 -p1 -b .add-selinux-policy-rules-allowing-access-to-proc-sys-fs-nr-open
+%patch -P52 -p1 -b .dont-print-xvnc-banner-before-parsing-args
+
+# Upstreamable patches
 
 %build
 %ifarch sparcv9 sparc64 s390 s390x
@@ -218,7 +263,7 @@ export CFLAGS="$RPM_OPT_FLAGS -fPIC"
 %else
 export CFLAGS="$RPM_OPT_FLAGS -fpic"
 %endif
-export CXXFLAGS="$CFLAGS"
+export CXXFLAGS="$CFLAGS -std=c++11"
 
 %{cmake} .
 make %{?_smp_mflags}
@@ -229,18 +274,17 @@ autoreconf -fiv
         --disable-xorg --disable-xnest --disable-xvfb --disable-dmx \
         --disable-xwin --disable-xephyr --disable-kdrive --disable-xwayland \
         --with-pic --disable-static \
-        --with-default-font-path="catalogue:%{_sysconfdir}/X11/fontpath.d,built-ins" \
-        --with-fontdir=%{_datadir}/X11/fonts \
+        --with-default-font-path="catalogue:/etc/X11/fontpath.d,built-ins" \
         --with-xkb-output=%{_localstatedir}/lib/xkb \
-        --enable-install-libxf86config \
-        --enable-glx --disable-dri --enable-dri2 --disable-dri3 \
+        --enable-glx --disable-dri --enable-dri2 --enable-dri3 \
         --disable-unit-tests \
         --disable-config-hal \
         --disable-config-udev \
-        --with-dri-driver-path=%{_libdir}/dri \
         --without-dtrace \
         --disable-devel-docs \
-        --disable-selective-werror
+        --disable-selective-werror \
+        --enable-systemd-logind \
+        --enable-config-udev
 
 make %{?_smp_mflags}
 popd
@@ -271,17 +315,18 @@ popd
 # Install systemd unit file
 install -m644 %{SOURCE1} %{buildroot}%{_unitdir}/xvnc@.service
 install -m644 %{SOURCE2} %{buildroot}%{_unitdir}/xvnc.socket
+# Install old vncserver script
+install -m 755 %{SOURCE5} %{buildroot}/%{_bindir}/vncserver
 
 # Install desktop stuff
 mkdir -p %{buildroot}%{_datadir}/icons/hicolor/{16x16,24x24,48x48}/apps
 
 pushd media/icons
-for s in 16 24 48; do
+for s in 16 22 24 32 48 64 128; do
 install -m644 tigervnc_$s.png %{buildroot}%{_datadir}/icons/hicolor/${s}x$s/apps/tigervnc.png
 done
 popd
 
-install -m 755 %{SOURCE5} %{buildroot}/%{_bindir}/vncserver
 
 %find_lang %{name} %{name}.lang
 
@@ -292,15 +337,14 @@ mkdir -p %{buildroot}%{_sysconfdir}/X11/xorg.conf.d/
 install -m 644 %{SOURCE3} %{buildroot}%{_sysconfdir}/X11/xorg.conf.d/10-libvnc.conf
 
 %post server
-%systemd_post xvnc.service
+%systemd_post xvnc@.service
 %systemd_post xvnc.socket
 
 %preun server
-%systemd_preun xvnc.service
 %systemd_preun xvnc.socket
 
 %postun server
-%systemd_postun xvnc.service
+%systemd_postun xvnc@.service
 %systemd_postun xvnc.socket
 
 %pre selinux
@@ -331,8 +375,8 @@ fi
 %{_unitdir}/vncserver@.service
 %{_unitdir}/xvnc@.service
 %{_unitdir}/xvnc.socket
-%{_bindir}/x0vncserver
 %{_bindir}/vncserver
+%{_bindir}/x0vncserver
 %{_sbindir}/vncsession
 %{_libexecdir}/vncserver
 %{_libexecdir}/vncsession-start
@@ -352,7 +396,7 @@ fi
 
 %files server-module
 %{_libdir}/xorg/modules/extensions/libvnc.so
-%config %{_sysconfdir}/X11/xorg.conf.d/10-libvnc.conf
+%config(noreplace) %{_sysconfdir}/X11/xorg.conf.d/10-libvnc.conf
 
 %files license
 %{_docdir}/tigervnc/LICENCE.TXT
@@ -362,53 +406,140 @@ fi
 
 %files selinux
 %{_datadir}/selinux/packages/%{selinuxtype}/%{modulename}.pp.*
-%ghost %verify(not md5 size mtime) %{_sharedstatedir}/selinux/%{selinuxtype}/active/modules/200/%{modulename}
+%ghost %verify(not md5 size mode mtime) %{_sharedstatedir}/selinux/%{selinuxtype}/active/modules/200/%{modulename}
 
 %changelog
-* Tue Jan 30 2024 mhink <mhink@ciq.com> 1.12.0-15.5
-- CVE-2024-31080 CVE-2024-31081 CVE-2024-31082 CVE-2024-31083
+* Wed Jun 18 2025 Jan Grulich <jgrulich@redhat.com> - 1.15.0-7
+- Additional fix to CVE-2025-49176: xorg-x11-server: Integer Overflow in Big Requests Extension
+  Resolves: RHEL-97294
 
-* Tue Jan 30 2024 mhink <mhink@ciq.com> 1.12.0-15.5
-- CVE-2023-6816 CVE-2024-0229 CVE-2024-21885 CVE-2024-21886
-* Wed Jan 03 2024 mhink <mhink@ciq.com> - 1.12.0-15.4
-- CVE Rollups from upstream: Patches by Jan Grulich <jgrulich@redhat.com>
-- Fix CVE-2023-5380 tigervnc: xorg-x11-server: Use-after-free bug in DestroyWindow
-- Fix CVE-2023-5367 tigervnc: xorg-x11-server: Out-of-bounds write in XIChangeDeviceProperty/RRChangeOutputProperty
-  Resolves: RHEL-15229
+* Tue Jun 17 2025 Jan Grulich <jgrulich@redhat.com> - 1.15.0-6
+- Fix CVE-2025-49175: xorg-x11-server: Out-of-Bounds Read in X Rendering Extension Animated Cursors
+  Resolves: RHEL-97268
+- Fix CVE-2025-49176: xorg-x11-server: Integer Overflow in Big Requests Extension
+  Resolves: RHEL-97294
+- Fix CVE-2025-49178: xorg-x11-server: Unprocessed Client Request Due to Bytes to Ignore
+  Resolves: RHEL-97364
+- Fix CVE-2025-49179: xorg-x11-server: Integer overflow in X Record extension
+  Resolves: RHEL-97397
+- Fix CVE-2025-49180: xorg-x11-server: Integer Overflow in X Resize, Rotate and Reflect (RandR) Extension
+  Resolves: RHEL-97232
+
+* Tue May 27 2025 Jan Grulich <jgrulich@redhat.com> - 1.15.0-5
+- Fix broken authentication with x0vncserver
+  Resolves: RHEL-93729
+
+* Thu May 15 2025 Jan Grulich <jgrulich@redhat.com> - 1.15.0-4
+- Add option "ApproveLoggedUserOnly" allowing to connect only the user
+  owning the running session
+  Resolves: RHEL-91104
+
+* Wed Apr 30 2025 Jan Grulich <jgrulich@redhat.com> - 1.15.0-3
+- Only warn about 8 characters limit, but let it proceed
+  Resolves: RHEL-89430
+
+* Wed Apr 16 2025 Jan Grulich <jgrulich@redhat.com> - 1.15.0-2
+- Fix inetd mode not working
+  Resolves: RHEL-86513
+
+* Wed Feb 26 2025 Jan Grulich <jgrulich@redhat.com> - 1.15.0-1
+- 1.15.0
+  Resolves: RHEL-79161
+  Resolves: RHEL-79982
+
+* Wed Feb 26 2025 Jan Grulich <jgrulich@redhat.com> - 1.13.1-15
+- Fix CVE-2025-26594 xorg-x11-server Use-after-free of the root cursor
+  Resolves: RHEL-79397
+- Fix CVE-2025-26595 xorg-x11-server Buffer overflow in XkbVModMaskText()
+  Resolves: RHEL-79401
+- Fix CVE-2025-26596 xorg-x11-server Heap overflow in XkbWriteKeySyms()
+  Resolves: RHEL-79386
+- Fix CVE-2025-26597 xorg-x11-server Buffer overflow in XkbChangeTypesOfKey()
+  Resolves: RHEL-79380
+- Fix CVE-2025-26598 xorg-x11-server Out-of-bounds write in CreatePointerBarrierClient()
+  Resolves: RHEL-79369
+- Fix CVE-2025-26599 xorg-x11-server Use of uninitialized pointer in compRedirectWindow()
+  Resolves: RHEL-79364
+- Fix CVE-2025-26600 xorg-x11-server Use-after-free in PlayReleasedEvents()
+  Resolves: RHEL-79360
+- Fix CVE-2025-26601 xorg-x11-server Use-after-free in SyncInitTrigger()
+  Resolves: RHEL-79348
+
+* Thu Oct 31 2024 Jan Grulich <jgrulich@redhat.com> - 1.13.1-14
+- Fix CVE-2024-9632: xorg-x11-server: heap-based buffer overflow privilege escalation vulnerability
+  Resolves: RHEL-61999
+
+* Mon Aug 05 2024 Jan Grulich <jgrulich@redhat.com> - 1.13.1-13
+- vncsession: use /bin/sh if the user shell is not set
+  Resolves: RHEL-52827
+
+* Fri Jul 12 2024 Jan Grulich <jgrulich@redhat.com> - 1.13.1-12
+- Fix FTBS: drop already applied Xorg patches
+  Resolves: RHEL-46696
+
+* Tue May 28 2024 Jan Grulich <jgrulich@redhat.com> - 1.13.1-11
+- vncconfig: add option to force view-only remote client connections
+  Resolves: RHEL-11908
+
+* Mon Apr 15 2024 Jan Grulich <jgrulich@redhat.com> - 1.13.1-10
+- Drop patches that are already part of xorg-x11-server
+  Resolves: RHEL-30755
+  Resolves: RHEL-30767
+  Resolves: RHEL-30761
+
+* Thu Apr 04 2024 Jan Grulich <jgrulich@redhat.com> - 1.13.1-9
+- Fix CVE-2024-31080 tigervnc: xorg-x11-server: Heap buffer overread/data leakage in ProcXIGetSelectedEvents
+  Resolves: RHEL-30755
+- Fix CVE-2024-31083 tigervnc: xorg-x11-server: User-after-free in ProcRenderAddGlyphs
+  Resolves: RHEL-30767
+- Fix CVE-2024-31081 tigervnc: xorg-x11-server: Heap buffer overread/data leakage in ProcXIPassiveGrabDevice
+  Resolves: RHEL-30761
+
+* Wed Feb 07 2024 Jan Grulich <jgrulich@redhat.com> - 1.13.1-8
+- Fix copy/paste error in the DeviceStateNotify
+  Resolves: RHEL-20530
+
+* Mon Jan 22 2024 Jan Grulich <jgrulich@redhat.com> - 1.13.1-7
+- Fix CVE-2024-21886 tigervnc: xorg-x11-server: heap buffer overflow in DisableDevice
+  Resolves: RHEL-20388
+- Fix CVE-2024-21885 tigervnc: xorg-x11-server: heap buffer overflow in XISendDeviceHierarchyEvent
+  Resolves: RHEL-20382
+- Fix CVE-2024-0229 tigervnc: xorg-x11-server: reattaching to different master device may lead to out-of-bounds memory access
+  Resolves: RHEL-20530
+- Fix CVE-2023-6816 tigervnc: xorg-x11-server: Heap buffer overflow in DeviceFocusEvent and ProcXIQueryPointer
+  Resolves: RHEL-21214
+
+* Mon Jan 08 2024 Jan Grulich <jgrulich@redhat.com> - 1.13.1-6
+- Use dup() to get available file descriptor when using -inetd option
+  Resolves: RHEL-21000
+
+* Mon Dec 18 2023 Jan Grulich <jgrulich@redhat.com> - 1.13.1-5
 - Fix CVE-2023-6377 tigervnc: xorg-x11-server: out-of-bounds memory reads/writes in XKB button actions
-  Resolves: RHEL-18409
+  Resolves: RHEL-18410
 - Fix CVE-2023-6478 tigervnc: xorg-x11-server: out-of-bounds memory read in RRChangeOutputProperty and RRChangeProviderProperty
-  Resolves: RHEL-18421
-- Updated fix for CVE-2023-6377 tigervnc: xorg-x11-server: out-of-bounds memory reads/writes in XKB button actions
-  Resolves: RHEL-18409
+  Resolves: RHEL-18422
 
-*Mon Mar 27 2023 Jan Grulich <jgrulich@redhat.com> - 1.12.0-15
-- xorg-x11-server: X.Org Server Overlay Window Use-After-Free Local Privilege Escalation Vulnerability
-  Resolves: bz#2180305
+* Wed Nov 01 2023 Jan Grulich <jgrulich@redhat.com> - 1.13.1-4
+- Fix CVE-2023-5380 tigervnc: xorg-x11-server: Use-after-free bug in DestroyWindow
+  Resolves: RHEL-15236
 
-* Tue Feb 21 2023 Jan Grulich <jgrulich@redhat.com> - 1.12.0-14
-- SELinux: allow vncsession create .vnc directory
-  Resolves: bz#2164704
+- Fix CVE-2023-5367 tigervnc: xorg-x11-server: Out-of-bounds write in XIChangeDeviceProperty/RRChangeOutputProperty
+  Resolves: RHEL-15230
 
-* Wed Feb 15 2023 Jan Grulich <jgrulich@redhat.com> - 1.12.0-13
-- Add sanity check when cleaning up keymap changes
-  Resolves: bz#2169960
+* Mon Oct 09 2023 Jan Grulich <jgrulich@redhat.com> - 1.13.1-3
+- Support username alias in PlainUsers
+  Resolves: RHEL-4258
 
-* Mon Feb 06 2023 Jan Grulich <jgrulich@redhat.com> - 1.12.0-12
-- xorg-x11-server: DeepCopyPointerClasses use-after-free leads to privilege elevation
-  Resolves: bz#2167058
+* Tue Apr 11 2023 Jan Grulich <jgrulich@redhat.com> - 1.13.1-2
+- xorg-x11-server: X.Org Server Overlay Window Use-After-Free Local Privilege
+  Escalation Vulnerability
+  Resolves: bz#2180306
 
-* Tue Dec 20 2022 Tomas Popela <tpopela@redhat.com> - 1.12.0-11
-- Rebuild for xorg-x11-server CVE-2022-46340 follow up fix
-
-* Fri Dec 16 2022 Jan Grulich <jgrulich@redhat.com> - 1.12.0-10
-- Rebuild for xorg-x11-server CVEs
-  Resolves: CVE-2022-4283 (bz#2154233)
-  Resolves: CVE-2022-46340 (bz#2154220)
-  Resolves: CVE-2022-46341 (bz#2154223)
-  Resolves: CVE-2022-46342 (bz#2154225)
-  Resolves: CVE-2022-46343 (bz#2154227)
-  Resolves: CVE-2022-46344 (bz#2154229)
+* Tue Mar 21 2023 Jan Grulich <jgrulich@redhat.com> - 1.13.1-1
+- 1.13.1
+  Resolves: bz#2175748
+- Restore "--fallbacktofreeport" option in the vncserver script
+  Resolves: bz#2174398
 
 * Thu Dec 08 2022 Jan Grulich <jgrulich@redhat.com> - 1.12.0-9
 - Bump build version to fix upgrade path

@@ -1,0 +1,265 @@
+From 69b0fd6d77ea5968bd815188ee2bda3d282ebc60 Mon Sep 17 00:00:00 2001
+From: Jan Grulich <jgrulich@redhat.com>
+Date: Mon, 29 Jul 2024 14:31:14 +0200
+Subject: [PATCH] Add option allowing to connect only the user owning the
+ running session
+
+Checks, whether the user who is trying to authenticate is already logged
+into the running session in order to allow or reject the connection.
+This is expected to be used with 'plain' security type in combination
+with 'PlainUsers=*' option allowing everyone to connect to the session.
+---
+ common/rfb/VNCServerST.cxx            |   7 --
+ unix/x0vncserver/XDesktop.cxx         |   8 ++
+ unix/xserver/hw/vnc/XserverDesktop.cc | 137 ++++++++++++++++++++++++++
+ unix/xserver/hw/vnc/XserverDesktop.h  |   7 ++
+ unix/xserver/hw/vnc/Xvnc.man          |   7 ++
+ 5 files changed, 159 insertions(+), 7 deletions(-)
+
+diff --git a/common/rfb/VNCServerST.cxx b/common/rfb/VNCServerST.cxx
+index b99d33b..aa8d53e 100644
+--- a/common/rfb/VNCServerST.cxx
++++ b/common/rfb/VNCServerST.cxx
+@@ -682,13 +682,6 @@ void VNCServerST::queryConnection(VNCSConnectionST* client,
+     return;
+   }
+ 
+-  // - Are we configured to do queries?
+-  if (!rfb::Server::queryConnect &&
+-      !client->getSock()->requiresQuery()) {
+-    approveConnection(client->getSock(), true, nullptr);
+-    return;
+-  }
+-
+   // - Does the client have the right to bypass the query?
+   if (client->accessCheck(AccessNoQuery))
+   {
+diff --git a/unix/x0vncserver/XDesktop.cxx b/unix/x0vncserver/XDesktop.cxx
+index b43e3f7..3d00e23 100644
+--- a/unix/x0vncserver/XDesktop.cxx
++++ b/unix/x0vncserver/XDesktop.cxx
+@@ -31,6 +31,7 @@
+ #include <network/Socket.h>
+ 
+ #include <rfb/LogWriter.h>
++#include <rfb/ServerCore.h>
+ 
+ #include <x0vncserver/XDesktop.h>
+ 
+@@ -320,6 +321,13 @@ void XDesktop::queryConnection(network::Socket* sock,
+ {
+   assert(isRunning());
+ 
++  // - Are we configured to do queries?
++  if (!rfb::Server::queryConnect &&
++      !sock->requiresQuery()) {
++    server->approveConnection(sock, true, nullptr);
++    return;
++  }
++
+   // Someone already querying?
+   if (queryConnectSock) {
+     std::list<network::Socket*> sockets;
+diff --git a/unix/xserver/hw/vnc/XserverDesktop.cc b/unix/xserver/hw/vnc/XserverDesktop.cc
+index 260ed3a..c8741f6 100644
+--- a/unix/xserver/hw/vnc/XserverDesktop.cc
++++ b/unix/xserver/hw/vnc/XserverDesktop.cc
+@@ -51,6 +51,11 @@
+ #include "XorgGlue.h"
+ #include "vncInput.h"
+ 
++#if HAVE_SYSTEMD_DAEMON
++#  include <pwd.h>
++#  include <systemd/sd-login.h>
++#endif
++
+ extern "C" {
+ void vncSetGlueContext(int screenIndex);
+ void vncPresentMscEvent(uint64_t id, uint64_t msc);
+@@ -71,6 +76,15 @@ IntParameter queryConnectTimeout("QueryConnectTimeout",
+                                  "rejecting the connection",
+                                  10);
+ 
++#ifdef HAVE_SYSTEMD_DAEMON
++BoolParameter approveLoggedUserOnly
++("ApproveLoggedUserOnly",
++ "Approve only the user who is currently logged into the session."
++ "This is expected to be combined with 'plain' security type and with "
++ "'PlainUsers=*' option allowing everyone to connect to the session."
++ "Default is off.",
++  false);
++#endif
+ 
+ XserverDesktop::XserverDesktop(int screenIndex_,
+                                std::list<network::SocketListener*> listeners_,
+@@ -164,11 +178,134 @@ void XserverDesktop::init(rfb::VNCServer* vs)
+   // ready state
+ }
+ 
++#ifdef HAVE_SYSTEMD_DAEMON
++bool XserverDesktop::checkUserLogged(const char* userName)
++{
++  bool ret = false;
++  bool noUserSession = true;
++  int res;
++  char **sessions;
++
++  res = sd_get_sessions(&sessions);
++  if (res < 0) {
++    vlog.debug("logind: failed to get sessions");
++    return false;
++  }
++
++  if (sessions != nullptr && sessions[0] != nullptr) {
++    for (int i = 0; sessions[i]; i++) {
++      uid_t uid;
++      char *clazz;
++      char *display;
++      char *type;
++      char *state;
++
++      res = sd_session_get_type(sessions[i], &type);
++      if (res < 0) {
++        vlog.debug("logind: failed to determine session type");
++        break;
++      }
++
++      if (strcmp(type, "x11") != 0) {
++        free(type);
++        continue;
++      }
++      free(type);
++
++      res = sd_session_get_display(sessions[i], &display);
++      if (res < 0) {
++        vlog.debug("logind: failed to determine display of session");
++        break;
++      }
++
++      std::string serverDisplay = ":" + std::to_string(screenIndex);
++      std::string serverDisplayIPv4 = "127.0.0.1:" + std::to_string(screenIndex);
++      std::string serverDisplayIPv6 = "::1:" + std::to_string(screenIndex);
++      if ((strcmp(display, serverDisplay.c_str()) != 0) &&
++          (strcmp(display, serverDisplayIPv4.c_str()) != 0) &&
++          (strcmp(display, serverDisplayIPv6.c_str()) != 0)) {
++        free(display);
++        continue;
++      }
++      free(display);
++
++      res = sd_session_get_class(sessions[i], &clazz);
++      if (res < 0) {
++        vlog.debug("logind: failed to determine session class");
++        break;
++      }
++
++      res = sd_session_get_state(sessions[i], &state);
++      if (res < 0) {
++        vlog.debug("logind: failed to determine session state");
++        break;
++      }
++
++      if (strcmp(state, "closing") == 0) {
++          free(state);
++          continue;
++      }
++      free(state);
++
++      res = sd_session_get_uid(sessions[i], &uid);
++      if (res < 0) {
++        vlog.debug("logind: failed to determine user id of session");
++        break;
++      }
++
++      if (uid != 0 && strcmp(clazz, "user") == 0) {
++        noUserSession = false;
++      }
++      free(clazz);
++
++      struct passwd *pw = getpwnam(userName);
++      if (!pw) {
++        vlog.debug("logind: user not found");
++        break;
++      }
++
++      if (uid == pw->pw_uid) {
++        ret = true;
++        break;
++      }
++    }
++  }
++
++  if (sessions) {
++    for (int i = 0; sessions[i]; i ++) {
++      free(sessions[i]);
++    }
++
++    free (sessions);
++  }
++
++  // If we didn't find a matching user, we can still allow the user
++  // to log in if there is no user session yet.
++  return !ret ? noUserSession : ret;
++}
++#endif
++
+ void XserverDesktop::queryConnection(network::Socket* sock,
+                                      const char* userName)
+ {
+   int count;
+ 
++#ifdef HAVE_SYSTEMD_DAEMON
++  // - Only owner of the session can be approved
++  if (approveLoggedUserOnly && !checkUserLogged(userName)) {
++    server->approveConnection(sock, false,
++                              "The user is not owner of the running session");
++    return;
++  }
++#endif
++
++  // - Are we configured to do queries?
++  if (!rfb::Server::queryConnect &&
++      !sock->requiresQuery()) {
++    server->approveConnection(sock, true, nullptr);
++    return;
++  }
++
+   if (queryConnectTimer.isStarted()) {
+     server->approveConnection(sock, false, "Another connection is currently being queried.");
+     return;
+diff --git a/unix/xserver/hw/vnc/XserverDesktop.h b/unix/xserver/hw/vnc/XserverDesktop.h
+index 8c543db..8d6bde4 100644
+--- a/unix/xserver/hw/vnc/XserverDesktop.h
++++ b/unix/xserver/hw/vnc/XserverDesktop.h
+@@ -108,6 +108,13 @@ public:
+   void grabRegion(const rfb::Region& r) override;
+ 
+ protected:
++#ifdef HAVE_SYSTEMD_DAEMON
++  // - Check whether user is logged into a session
++  //   Returns true if user is already logged or there is no
++  //   user session at all.
++  bool checkUserLogged(const char* userName);
++#endif
++
+   bool handleListenerEvent(int fd,
+                            std::list<network::SocketListener*>* sockets,
+                            rfb::VNCServer* sockserv);
+diff --git a/unix/xserver/hw/vnc/Xvnc.man b/unix/xserver/hw/vnc/Xvnc.man
+index d6b1664..24384df 100644
+--- a/unix/xserver/hw/vnc/Xvnc.man
++++ b/unix/xserver/hw/vnc/Xvnc.man
+@@ -200,6 +200,13 @@ Never treat incoming connections as shared, regardless of the client-specified
+ setting. Default is off.
+ .
+ .TP
++.B \-ApproveLoggedUserOnly
++Approve only the user who is currently logged into the session.
++This is expected to be combined with "Plain" security type and with
++"PlainUsers=*" option allowing everyone to connect to the session.
++Default is off.
++.
++.TP
+ .B \-pam_service \fIname\fP, \-PAMService \fIname\fP
+ PAM service name to use when authentication users using any of the "Plain"
+ security types. Default is \fBvnc\fP.

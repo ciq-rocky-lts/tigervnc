@@ -1,0 +1,47 @@
+From e652f06940f84fd8e19d7b674ae8c6000530fb40 Mon Sep 17 00:00:00 2001
+From: Jan Grulich <jgrulich@redhat.com>
+Date: Fri, 7 Feb 2025 15:32:49 +0100
+Subject: [PATCH] Add SELinux policy rules allowing to create directories under
+ /root
+
+We have policy that allows to create ~/.local or ~/.config, but we don't
+have rule that allows the same under /root directory, where we fail in
+case any of these directories doesn't exist.
+---
+ unix/vncserver/selinux/vncsession.te | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/unix/vncserver/selinux/vncsession.te b/unix/vncserver/selinux/vncsession.te
+index d92f1bda7d..2f49717077 100644
+--- a/unix/vncserver/selinux/vncsession.te
++++ b/unix/vncserver/selinux/vncsession.te
+@@ -48,6 +48,14 @@ optional_policy(`
+ 	create_dirs_pattern(vnc_session_t, gconf_home_t, gconf_home_t)
+ ')
+ 
++# Allowed to create /root/.local
++optional_policy(`
++	gen_require(`
++		type admin_home_t;
++	')
++	create_dirs_pattern(vnc_session_t, admin_home_t, admin_home_t)
++')
++
+ # Manage TigerVNC files (mainly ~/.local/state/*.log)
+ create_dirs_pattern(vnc_session_t, vnc_home_t, vnc_home_t)
+ manage_files_pattern(vnc_session_t, vnc_home_t, vnc_home_t)
+@@ -88,6 +96,7 @@ optional_policy(`
+ 	gen_require(`
+ 		attribute userdomain;
+ 		type gconf_home_t;
++		type admin_home_t;
+ 	')
+ 	userdom_admin_home_dir_filetrans(userdomain, vnc_home_t, dir, ".vnc")
+ 	userdom_user_home_dir_filetrans(userdomain, vnc_home_t, dir, ".vnc")
+@@ -95,5 +104,6 @@ optional_policy(`
+ 	gnome_config_filetrans(userdomain, vnc_home_t, dir, "tigervnc")
+ 	gnome_data_filetrans(userdomain, vnc_home_t, dir, "tigervnc")
+ 	filetrans_pattern(userdomain, gconf_home_t, vnc_home_t, dir, "tigervnc")
++	filetrans_pattern(vnc_session_t, admin_home_t, vnc_home_t, dir, "tigervnc")
+ 	filetrans_pattern(vnc_session_t, gconf_home_t, vnc_home_t, dir, "tigervnc")
+ ')

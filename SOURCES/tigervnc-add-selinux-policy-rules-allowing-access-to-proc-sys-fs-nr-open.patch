@@ -1,0 +1,27 @@
+From 313200978926cc7b7521c0d645918391b7609681 Mon Sep 17 00:00:00 2001
+From: Jan Grulich <jgrulich@redhat.com>
+Date: Thu, 27 Feb 2025 13:49:02 +0100
+Subject: [PATCH] Add SELinux policy rules allowing to access
+ /proc/sys/fs/nr_open
+
+This is needed when the nofile limit is set to unlimited, otherwise we
+will fail to start a VNC session.
+---
+ unix/vncserver/selinux/vncsession.te | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/unix/vncserver/selinux/vncsession.te b/unix/vncserver/selinux/vncsession.te
+index d92f1bd..2ce4fc8 100644
+--- a/unix/vncserver/selinux/vncsession.te
++++ b/unix/vncserver/selinux/vncsession.te
+@@ -37,6 +37,10 @@ allow vnc_session_t self:fifo_file rw_fifo_file_perms;
+ allow vnc_session_t vnc_session_var_run_t:file manage_file_perms;
+ files_pid_filetrans(vnc_session_t, vnc_session_var_run_t, file)
+ 
++# Allow access to /proc/sys/fs/nr_open
++# Needed when the nofile limit is set to unlimited.
++kernel_read_fs_sysctls(vnc_session_t)
++
+ # Allowed to create ~/.local
+ optional_policy(`
+ 	gnome_filetrans_home_content(vnc_session_t)

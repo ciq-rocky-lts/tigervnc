@@ -121,7 +121,7 @@ if ($fontPath eq "") {
 # Check command line options
 
 &ParseOptions("-geometry",1,"-depth",1,"-pixelformat",1,"-name",1,"-kill",1,
-	      "-help",0,"-h",0,"--help",0,"-fp",1,"-list",0,"-fg",0,"-autokill",0,"-noxstartup",0,"-xstartup",1);
+	      "-help",0,"-h",0,"--help",0,"-fp",1,"-list",0,"-fg",0,"-autokill",0,"-noxstartup",0,"-xstartup",1,"-fallbacktofreeport",0);
 
 &Usage() if ($opt{'-help'} || $opt{'-h'} || $opt{'--help'});
 
@@ -168,8 +168,13 @@ if ((@ARGV > 0) && ($ARGV[0] =~ /^:(\d+)$/)) {
     $displayNumber = $1;
     shift(@ARGV);
     if (!&CheckDisplayNumber($displayNumber)) {
-        warn "A VNC server is already running as :$displayNumber\n";
-        $displayNumber = &GetDisplayNumber();
+        if ($opt{'-fallbacktofreeport'}) {
+            warn "A VNC server is already running as :$displayNumber\n";
+            $displayNumber = &GetDisplayNumber();
+            warn "Using port :$displayNumber as fallback\n";
+        } else {
+            die "A VNC server is already running as :$displayNumber\n";
+        }
     }
 } elsif ((@ARGV > 0) && ($ARGV[0] !~ /^-/) && ($ARGV[0] !~ /^\+/)) {
     &Usage();
@@ -675,6 +680,7 @@ sub Usage
 	"                 [-autokill]\n".
 	"                 [-noxstartup]\n".
 	"                 [-xstartup <file>]\n".
+	"                 [-fallbacktofreeport]\n".
 	"                 <Xvnc-options>...\n\n".
 	"       $prog -kill <X-display>\n\n".
 	"       $prog -list\n\n");
