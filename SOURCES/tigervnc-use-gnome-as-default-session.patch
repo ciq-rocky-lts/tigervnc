@@ -1,0 +1,12 @@
+diff --git a/unix/vncserver/vncserver-config-defaults b/unix/vncserver/vncserver-config-defaults
+index 0c217bf..2889347 100644
+--- a/unix/vncserver/vncserver-config-defaults
++++ b/unix/vncserver/vncserver-config-defaults
+@@ -13,3 +13,7 @@
+ # geometry=2000x1200
+ # localhost
+ # alwaysshared
++
++# Default to GNOME session
++# Note: change this only when you know what are you doing
++session=gnome

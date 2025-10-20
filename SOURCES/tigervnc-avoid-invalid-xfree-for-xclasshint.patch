@@ -1,0 +1,24 @@
+From 6c8387018b130eb4ef69ea377e9154ba04f0fd50 Mon Sep 17 00:00:00 2001
+From: Pierre Ossman <ossman@cendio.se>
+Date: Tue, 22 Oct 2024 09:58:27 +0200
+Subject: [PATCH] Avoid invalid XFree for XClassHint
+
+It seems XGetClassHint() doesn't set the pointers to NULL if there is no
+name, so we need to make sure it is cleared beforehand. Otherwise we can
+get an invalid pointer given to XFree().
+---
+ unix/tx/TXWindow.cxx | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/unix/tx/TXWindow.cxx b/unix/tx/TXWindow.cxx
+index b6a29d679..639c13827 100644
+--- a/unix/tx/TXWindow.cxx
++++ b/unix/tx/TXWindow.cxx
+@@ -313,6 +313,7 @@ void TXWindow::toplevel(const char* name, TXDeleteWindowCallback* dwc_,
+ void TXWindow::setName(const char* name)
+ {
+   XClassHint classHint;
++  memset(&classHint, 0, sizeof(classHint));
+   XGetClassHint(dpy, win(), &classHint);
+   XFree(classHint.res_name);
+   classHint.res_name = (char*)name;
